@@ -1,0 +1,14 @@
+[package]
+authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
+name = "tokio-timeit-service"
+version = "0.1.0"
+
+[dependencies]
+time = "0.1.35"
+
+[dependencies.futures]
+default-features = false
+git = "https://github.com/alexcrichton/futures-rs"
+
+[dependencies.tokio-service]
+git = "https://github.com/tokio-rs/tokio-service"
