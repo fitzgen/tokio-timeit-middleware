@@ -1,6 +1,6 @@
 [package]
 authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
-name = "tokio-timeit-service"
+name = "tokio-timeit-middleware"
 version = "0.1.0"
 
 [dependencies]
