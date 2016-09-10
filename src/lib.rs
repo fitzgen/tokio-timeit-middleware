@@ -7,33 +7,39 @@ extern crate time;
 extern crate tokio_service;
 
 use futures::{Async, Future, Poll};
+use std::ops;
 use tokio_service::Service;
 
 /// TODO
-pub struct TimeitService<S> {
+pub struct TimeitService<S, F> {
     downstream: S,
+    time_sink: F,
 }
 
-impl<S> TimeitService<S> {
+impl<S, TimeSink> TimeitService<S, TimeSink> {
     /// TODO
-    pub fn new(service: S) -> TimeitService<S> {
+    pub fn new(service: S, time_sink: TimeSink) -> TimeitService<S, TimeSink> {
         TimeitService {
-            downstream: service
+            downstream: service,
+            time_sink: time_sink,
         }
     }
 }
 
-impl<S> Service for TimeitService<S>
-    where S: Service
+impl<S, TimeSink, TimeSinkFn> Service for TimeitService<S, TimeSink>
+    where S: Service,
+          TimeSink: ops::Deref<Target = TimeSinkFn> + Clone,
+          TimeSinkFn: Fn(time::Duration)
 {
     type Request = S::Request;
     type Response = S::Response;
     type Error = S::Error;
-    type Future = EndTimeit<S::Future>;
+    type Future = EndTimeit<S::Future, TimeSink>;
 
     fn call(&self, request: Self::Request) -> Self::Future {
         EndTimeit {
             start: Some(time::now()),
+            time_sink: self.time_sink.clone(),
             future: self.downstream.call(request),
         }
     }
@@ -44,13 +50,16 @@ impl<S> Service for TimeitService<S>
 }
 
 /// TODO
-pub struct EndTimeit<F> {
+pub struct EndTimeit<F, TimeSink> {
     start: Option<time::Tm>,
+    time_sink: TimeSink,
     future: F,
 }
 
-impl<F> Future for EndTimeit<F>
-    where F: Future
+impl<F, TimeSink, TimeSinkFn> Future for EndTimeit<F, TimeSink>
+    where F: Future,
+          TimeSink: ops::Deref<Target = TimeSinkFn> + Clone,
+          TimeSinkFn: Fn(time::Duration)
 {
     type Item = F::Item;
     type Error = F::Error;
@@ -63,7 +72,7 @@ impl<F> Future for EndTimeit<F>
                 let start =
                     self.start.take().expect("Should not call poll on EndTimeit more than once");
                 let end = time::now();
-                println!("call took {}", end - start);
+                (*self.time_sink)(end - start);
                 Ok(Async::Ready(r))
             }
         }
@@ -77,29 +86,34 @@ mod tests {
 
     use super::*;
 
-    use futures::Async;
+    use futures::{Async, Future};
+    use std::cell::Cell;
+    use std::rc::Rc;
     use tokio_service::Service;
 
-    struct StubService<P> {
+    struct StubService<C, P> {
+        c: C,
         p: P,
     }
 
-    impl<P> StubService<P> {
-        fn new(p: P) -> StubService<P> {
-            StubService {
-                p: p
-            }
+    impl<C, P> StubService<C, P> {
+        fn new(c: C, p: P) -> StubService<C, P> {
+            StubService { c: c, p: p }
         }
     }
 
-    impl<P> Service for StubService<P> where P: Fn() -> Async<()> {
+    impl<C, T, F, P> Service for StubService<C, P>
+        where C: Fn() -> F,
+              F: Future<Item = T, Error = ()> + 'static,
+              P: Fn() -> Async<()>
+    {
         type Request = ();
-        type Response = ();
+        type Response = T;
         type Error = ();
-        type Future = futures::Done<(), ()>;
+        type Future = F;
 
         fn call(&self, _: Self::Request) -> Self::Future {
-            futures::done(Ok(()))
+            (self.c)()
         }
 
         fn poll_ready(&self) -> Async<()> {
@@ -109,15 +123,50 @@ mod tests {
 
     #[test]
     fn if_downstream_not_ready_neither_are_we() {
-        let stub = StubService::new(|| Async::NotReady);
-        let wrapped = TimeitService::new(stub);
+        let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
+        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
         assert_eq!(wrapped.poll_ready(), Async::NotReady);
     }
 
     #[test]
     fn if_downstream_ready_so_are_we() {
-        let stub = StubService::new(|| Async::Ready(()));
-        let wrapped = TimeitService::new(stub);
+        let stub = StubService::new(|| futures::done(Ok(())), || Async::Ready(()));
+        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
         assert_eq!(wrapped.poll_ready(), Async::Ready(()));
+    }
+
+    #[test]
+    fn if_downstream_returns_value_so_do_we() {
+        let stub = StubService::new(|| futures::done(Ok(5)), || Async::NotReady);
+        let wrapped = TimeitService::new(stub, Rc::new(|_| {}));
+        let mut future = wrapped.call(());
+        assert_eq!(future.poll(), Ok(Async::Ready(5)));
+    }
+
+    #[test]
+    fn if_downstream_does_not_return_value_time_sink_not_called() {
+        let stub = StubService::new(|| futures::empty::<(), ()>(), || Async::NotReady);
+        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
+        let mut future = wrapped.call(());
+        assert_eq!(future.poll(), Ok(Async::NotReady));
+    }
+
+    #[test]
+    fn if_downstream_returns_value_time_sink_is_called() {
+        let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
+
+        let times_called = Cell::new(0);
+        let wrapped = TimeitService::new(stub, Rc::new(|_| {
+            times_called.set(times_called.get() + 1);
+        }));
+
+        let expected_times_called = 10;
+
+        for _ in 0..expected_times_called {
+            let mut future = wrapped.call(());
+            assert_eq!(future.poll(), Ok(Async::Ready(())));
+        }
+
+        assert_eq!(times_called.get(), expected_times_called);
     }
 }
