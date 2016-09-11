@@ -1,5 +1,29 @@
-//! `tokio-timeit-middleware` provides a middleware Tokio `Service` to time how
-//! long it takes to reply to a `Service::Request` with a `Service::Response`.
+//! `tokio-timeit-middleware` provides a middleware Tokio `Service` called
+//! [`Timeit`](./struct.Timeit.html) to time how long it takes to reply to a
+//! `Service::Request` with a `Service::Response`.
+//!
+//! The recorded timings are sent to a `TimeSink` which may be any smart pointer
+//! type that `Deref`s to a function that takes a
+//! [`time::Duration`](https://doc.rust-lang.org/time/time/struct.Duration.html)
+//! and is `Clone`.
+//!
+//! # Example
+//!
+//! ```
+//! # extern crate time;
+//! # extern crate tokio_service;
+//! # extern crate tokio_timeit_middleware;
+//! # use std::rc::Rc;
+//! # fn foo<S>(my_tokio_service: S) where S: tokio_service::Service {
+//! // Send recorded timings to metrics or logging or whatever...
+//! let time_sink = Rc::new(|timing: time::Duration| {
+//!     println!("Replied to a request with a response in {}", timing);
+//! });
+//!
+//! // Wrap a service in `Timeit`!
+//! let my_timed_service = tokio_timeit_middleware::Timeit::new(my_tokio_service, time_sink);
+//! # }
+//! ```
 
 #![deny(missing_docs)]
 
@@ -14,40 +38,22 @@ use tokio_service::Service;
 /// A middleware that times how long it takes the downstream service `S` to
 /// respond to a request with a response. The recorded `time::Duration`s are
 /// passed to the `TimeSink`.
-pub struct TimeitService<S, TimeSink> {
+pub struct Timeit<S, TimeSink> {
     downstream: S,
     time_sink: TimeSink,
 }
 
-impl<S, TimeSink> TimeitService<S, TimeSink> {
-    /// Wrap the given `service` for time recording.
-    ///
-    /// The `time_sink` may be any smart pointer type that `Deref`s to a
-    /// function that takes a
-    /// [`time::Duration`](https://doc.rust-lang.org/time/time/struct.Duration.html)
-    /// and is `Clone`.
-    ///
-    /// ```
-    /// # extern crate time;
-    /// # extern crate tokio_service;
-    /// # extern crate tokio_timeit_middleware;
-    /// # use std::rc::Rc;
-    /// # fn foo<S>(my_tokio_service: S) where S: tokio_service::Service {
-    /// let my_timed_service = tokio_timeit_middleware::TimeitService::new(my_tokio_service, Rc::new(|duration: time::Duration| {
-    ///     // Send this to metrics or logging or whatever...
-    ///     println!("Replied to a request with a response in {}", duration);
-    /// }));
-    /// # }
-    /// ```
-    pub fn new(service: S, time_sink: TimeSink) -> TimeitService<S, TimeSink> {
-        TimeitService {
+impl<S, TimeSink> Timeit<S, TimeSink> {
+    /// Wrap the given `service` for timing.
+    pub fn new(service: S, time_sink: TimeSink) -> Timeit<S, TimeSink> {
+        Timeit {
             downstream: service,
             time_sink: time_sink,
         }
     }
 }
 
-impl<S, TimeSink, TimeSinkFn> Service for TimeitService<S, TimeSink>
+impl<S, TimeSink, TimeSinkFn> Service for Timeit<S, TimeSink>
     where S: Service,
           TimeSink: ops::Deref<Target = TimeSinkFn> + Clone,
           TimeSinkFn: Fn(time::Duration)
@@ -71,6 +77,7 @@ impl<S, TimeSink, TimeSinkFn> Service for TimeitService<S, TimeSink>
 }
 
 /// A future that ends a time recording upon resolution.
+#[doc(hidden)]
 pub struct EndTimeit<F, TimeSink> {
     start: Option<time::Tm>,
     time_sink: TimeSink,
@@ -145,21 +152,21 @@ mod tests {
     #[test]
     fn if_downstream_not_ready_neither_are_we() {
         let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
-        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
+        let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
         assert_eq!(wrapped.poll_ready(), Async::NotReady);
     }
 
     #[test]
     fn if_downstream_ready_so_are_we() {
         let stub = StubService::new(|| futures::done(Ok(())), || Async::Ready(()));
-        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
+        let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
         assert_eq!(wrapped.poll_ready(), Async::Ready(()));
     }
 
     #[test]
     fn if_downstream_returns_value_so_do_we() {
         let stub = StubService::new(|| futures::done(Ok(5)), || Async::NotReady);
-        let wrapped = TimeitService::new(stub, Rc::new(|_| {}));
+        let wrapped = Timeit::new(stub, Rc::new(|_| {}));
         let mut future = wrapped.call(());
         assert_eq!(future.poll(), Ok(Async::Ready(5)));
     }
@@ -167,7 +174,7 @@ mod tests {
     #[test]
     fn if_downstream_does_not_return_value_time_sink_not_called() {
         let stub = StubService::new(|| futures::empty::<(), ()>(), || Async::NotReady);
-        let wrapped = TimeitService::new(stub, Rc::new(|_| unreachable!()));
+        let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
         let mut future = wrapped.call(());
         assert_eq!(future.poll(), Ok(Async::NotReady));
     }
@@ -177,10 +184,10 @@ mod tests {
         let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
 
         let times_called = Cell::new(0);
-        let wrapped = TimeitService::new(stub,
-                                         Rc::new(|_| {
-                                             times_called.set(times_called.get() + 1);
-                                         }));
+        let wrapped = Timeit::new(stub,
+                                  Rc::new(|_| {
+                                      times_called.set(times_called.get() + 1);
+                                  }));
 
         let expected_times_called = 10;
 

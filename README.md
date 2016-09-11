@@ -19,10 +19,10 @@ extern crate tokio_timeit_middleware;
 ```
 
 To time your Tokio `Service`'s request/response times, wrap it in
-`tokio_timeit_middleware::TimeitService`:
+`tokio_timeit_middleware::Timeit`:
 
 ```rust
-let timed_service = TimeitService::new(my_tokio_service, Rc::new(|duration| {
+let timed_service = Timeit::new(my_tokio_service, Rc::new(|duration| {
     println!("Responded to request in {}", duration);
 ));
 ```
