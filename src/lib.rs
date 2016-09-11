@@ -1,4 +1,5 @@
-//! TODO
+//! `tokio-timeit-middleware` provides a middleware Tokio `Service` to time how
+//! long it takes to reply to a `Service::Request` with a `Service::Response`.
 
 #![deny(missing_docs)]
 
@@ -10,14 +11,34 @@ use futures::{Async, Future, Poll};
 use std::ops;
 use tokio_service::Service;
 
-/// TODO
-pub struct TimeitService<S, F> {
+/// A middleware that times how long it takes the downstream service `S` to
+/// respond to a request with a response. The recorded `time::Duration`s are
+/// passed to the `TimeSink`.
+pub struct TimeitService<S, TimeSink> {
     downstream: S,
-    time_sink: F,
+    time_sink: TimeSink,
 }
 
 impl<S, TimeSink> TimeitService<S, TimeSink> {
-    /// TODO
+    /// Wrap the given `service` for time recording.
+    ///
+    /// The `time_sink` may be any smart pointer type that `Deref`s to a
+    /// function that takes a
+    /// [`time::Duration`](https://doc.rust-lang.org/time/time/struct.Duration.html)
+    /// and is `Clone`.
+    ///
+    /// ```
+    /// # extern crate time;
+    /// # extern crate tokio_service;
+    /// # extern crate tokio_timeit_middleware;
+    /// # use std::rc::Rc;
+    /// # fn foo<S>(my_tokio_service: S) where S: tokio_service::Service {
+    /// let my_timed_service = tokio_timeit_middleware::TimeitService::new(my_tokio_service, Rc::new(|duration: time::Duration| {
+    ///     // Send this to metrics or logging or whatever...
+    ///     println!("Replied to a request with a response in {}", duration);
+    /// }));
+    /// # }
+    /// ```
     pub fn new(service: S, time_sink: TimeSink) -> TimeitService<S, TimeSink> {
         TimeitService {
             downstream: service,
@@ -49,7 +70,7 @@ impl<S, TimeSink, TimeSinkFn> Service for TimeitService<S, TimeSink>
     }
 }
 
-/// TODO
+/// A future that ends a time recording upon resolution.
 pub struct EndTimeit<F, TimeSink> {
     start: Option<time::Tm>,
     time_sink: TimeSink,
@@ -156,9 +177,10 @@ mod tests {
         let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
 
         let times_called = Cell::new(0);
-        let wrapped = TimeitService::new(stub, Rc::new(|_| {
-            times_called.set(times_called.get() + 1);
-        }));
+        let wrapped = TimeitService::new(stub,
+                                         Rc::new(|_| {
+                                             times_called.set(times_called.get() + 1);
+                                         }));
 
         let expected_times_called = 10;
 
