@@ -1,6 +1,10 @@
 [package]
 authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
+description = "Time how long it takes your Tokio Service to send a `Service::Response` in reply to a `Service::Request`."
+documentation = "http://docs.rs/tokio-timeit-middleware"
+license = "Apache-2.0/MIT"
 name = "tokio-timeit-middleware"
+repository = "https://github.com/fitzgen/tokio-timeit-middleware/"
 version = "0.1.0"
 
 [dependencies]
