@@ -4,8 +4,6 @@ name = "tokio-timeit-middleware"
 version = "0.1.0"
 
 [dependencies]
-time = "0.1.35"
-futures = "0.1.0"
-
-[dependencies.tokio-service]
-git = "https://github.com/tokio-rs/tokio-service"
+time = "0.1.36"
+futures = "0.1.13"
+tokio-service = "0.1.0"

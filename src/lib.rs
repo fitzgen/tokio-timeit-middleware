@@ -70,10 +70,6 @@ impl<S, TimeSink, TimeSinkFn> Service for Timeit<S, TimeSink>
             future: self.downstream.call(request),
         }
     }
-
-    fn poll_ready(&self) -> Async<()> {
-        self.downstream.poll_ready()
-    }
 }
 
 /// A future that ends a time recording upon resolution.
@@ -119,21 +115,19 @@ mod tests {
     use std::rc::Rc;
     use tokio_service::Service;
 
-    struct StubService<C, P> {
+    struct StubService<C> {
         c: C,
-        p: P,
     }
 
-    impl<C, P> StubService<C, P> {
-        fn new(c: C, p: P) -> StubService<C, P> {
-            StubService { c: c, p: p }
+    impl<C> StubService<C> {
+        fn new(c: C) -> StubService<C> {
+            StubService { c: c }
         }
     }
 
-    impl<C, T, F, P> Service for StubService<C, P>
+    impl<C, T, F> Service for StubService<C>
         where C: Fn() -> F,
-              F: Future<Item = T, Error = ()> + 'static,
-              P: Fn() -> Async<()>
+              F: Future<Item = T, Error = ()> + 'static
     {
         type Request = ();
         type Response = T;
@@ -143,29 +137,11 @@ mod tests {
         fn call(&self, _: Self::Request) -> Self::Future {
             (self.c)()
         }
-
-        fn poll_ready(&self) -> Async<()> {
-            (self.p)()
-        }
-    }
-
-    #[test]
-    fn if_downstream_not_ready_neither_are_we() {
-        let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
-        let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
-        assert_eq!(wrapped.poll_ready(), Async::NotReady);
-    }
-
-    #[test]
-    fn if_downstream_ready_so_are_we() {
-        let stub = StubService::new(|| futures::done(Ok(())), || Async::Ready(()));
-        let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
-        assert_eq!(wrapped.poll_ready(), Async::Ready(()));
     }
 
     #[test]
     fn if_downstream_returns_value_so_do_we() {
-        let stub = StubService::new(|| futures::done(Ok(5)), || Async::NotReady);
+        let stub = StubService::new(|| futures::done(Ok(5)));
         let wrapped = Timeit::new(stub, Rc::new(|_| {}));
         let mut future = wrapped.call(());
         assert_eq!(future.poll(), Ok(Async::Ready(5)));
@@ -173,7 +149,7 @@ mod tests {
 
     #[test]
     fn if_downstream_does_not_return_value_time_sink_not_called() {
-        let stub = StubService::new(|| futures::empty::<(), ()>(), || Async::NotReady);
+        let stub = StubService::new(|| futures::empty::<(), ()>());
         let wrapped = Timeit::new(stub, Rc::new(|_| unreachable!()));
         let mut future = wrapped.call(());
         assert_eq!(future.poll(), Ok(Async::NotReady));
@@ -181,7 +157,7 @@ mod tests {
 
     #[test]
     fn if_downstream_returns_value_time_sink_is_called() {
-        let stub = StubService::new(|| futures::done(Ok(())), || Async::NotReady);
+        let stub = StubService::new(|| futures::done(Ok(())));
 
         let times_called = Cell::new(0);
         let wrapped = Timeit::new(stub,
