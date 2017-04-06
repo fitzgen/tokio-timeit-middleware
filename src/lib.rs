@@ -185,9 +185,7 @@ mod tests {
 
         let times_called = Cell::new(0);
         let wrapped = Timeit::new(stub,
-                                  Rc::new(|_| {
-                                      times_called.set(times_called.get() + 1);
-                                  }));
+                                  Rc::new(|_| { times_called.set(times_called.get() + 1); }));
 
         let expected_times_called = 10;
 
