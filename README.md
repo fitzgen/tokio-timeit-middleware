@@ -1,5 +1,7 @@
 # tokio-timeit-middleware
 
+<img src="https://img.shields.io/crates/v/tokio-timeit-middleware.svg" alt="tokio-timeit-middleware’s current version badge" title="tokio-timeit-middleware’s current version badge">
+
 Time how long it takes your Tokio `Service` to send a `Service::Response` in
 reply to a `Service::Request`.
 
